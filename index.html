@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>Bite Rhythm Game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #header {
+    display: flex;
+    gap: 40px;
+    padding: 12px 24px;
+    background: rgba(255,255,255,0.05);
+    width: 100%;
+    justify-content: center;
+    align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .stat { text-align: center; }
+  .stat-label { font-size: 10px; color: #888; letter-spacing: 2px; }
+  .stat-value { font-size: 28px; font-weight: bold; color: #fff; }
+  #score-value { color: #00ffaa; }
+  #combo-value { color: #ff6b35; }
+  #main {
+    display: flex;
+    gap: 16px;
+    padding: 12px;
+    flex: 1;
+    align-items: flex-start;
+    width: 100%;
+    max-width: 1000px;
+  }
+  #game-canvas {
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    background: #0d0d1a;
+    flex-shrink: 0;
+  }
+  #side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 220px;
+    flex-shrink: 0;
+  }
+  #cam-container {
+    position: relative;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  #webcam {
+    width: 220px;
+    height: 165px;
+    object-fit: cover;
+    display: block;
+    transform: scaleX(-1);
+  }
+  #face-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 220px;
+    height: 165px;
+    transform: scaleX(-1);
+  }
+  #mouth-meter {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .meter-label { font-size: 10px; color: #888; letter-spacing: 2px; margin-bottom: 6px; }
+  #meter-bar-bg {
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    height: 12px;
+    overflow: hidden;
+  }
+  #meter-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #00ffaa, #00ccff);
+    border-radius: 4px;
+    transition: width 0.05s;
+  }
+  #bite-indicator {
+    margin-top: 8px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+    color: #ff6b35;
+    opacity: 0;
+    transition: opacity 0.1s;
+    letter-spacing: 2px;
+  }
+  #instructions {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.8;
+  }
+  #instructions strong { color: #fff; }
+  #start-btn {
+    background: linear-gradient(135deg, #00ffaa, #00ccff);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    letter-spacing: 2px;
+    width: 100%;
+  }
+  #start-btn:hover { opacity: 0.85; }
+  #judgment-overlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 48px;
+    font-weight: bold;
+    pointer-events: none;
+    opacity: 0;
+    text-shadow: 0 0 20px currentColor;
+  }
+  #status-msg {
+    font-size: 11px;
+    color: #666;
+    text-align: center;
+    padding: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div class="stat">
+    <div class="stat-label">SCORE</div>
+    <div class="stat-value" id="score-value">0</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">COMBO</div>
+    <div class="stat-value" id="combo-value">0</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">PERFECT</div>
+    <div class="stat-value" id="perfect-value" style="color:#ffdd00">0</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">MISS</div>
+    <div class="stat-value" id="miss-value" style="color:#ff4466">0</div>
+  </div>
+</div>
+
+<div id="main">
+  <canvas id="game-canvas" width="600" height="480"></canvas>
+
+  <div id="side-panel">
+    <div id="cam-container">
+      <video id="webcam" autoplay muted playsinline></video>
+      <canvas id="face-canvas" width="220" height="165"></canvas>
+    </div>
+
+    <div id="mouth-meter">
+      <div class="meter-label">MOUTH OPEN</div>
+      <div id="meter-bar-bg"><div id="meter-bar"></div></div>
+      <div id="bite-indicator">BITE!</div>
+    </div>
+
+    <div id="instructions">
+      <strong>HOW TO PLAY</strong><br>
+      カメラに顔を映して<br>
+      バーが判定ラインに<br>
+      来たら噛む（口を閉じる）<br><br>
+      <strong>TIMING</strong><br>
+      <span style="color:#ffdd00">PERFECT</span> ±40ms<br>
+      <span style="color:#00ccff">GOOD</span> ±80ms<br>
+      <span style="color:#ff4466">MISS</span> それ以外
+    </div>
+
+    <div id="status-msg">カメラ初期化中...</div>
+    <button id="start-btn" onclick="startGame()">▶ START</button>
+  </div>
+</div>
+
+<div id="judgment-overlay"></div>
+
+<!-- MediaPipe FaceMesh via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+<script>
+// ── AudioContext (Web Audio API) ──────────────────────────────────
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playHitSound(type) {
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  if (type === 'perfect') {
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+  } else if (type === 'good') {
+    o.frequency.value = 660;
+    g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+  } else {
+    o.frequency.value = 220;
+    g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+  }
+  o.start(); o.stop(audioCtx.currentTime + 0.3);
+}
+
+// ── Game State ────────────────────────────────────────────────────
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const LANE_COUNT = 4;
+const LANE_W = (W - 80) / LANE_COUNT;
+const LANE_OFFSET_X = 40;
+const JUDGE_Y = H - 80;
+const BAR_H = 20;
+const BAR_SPEED = 280; // px/sec
+const PERFECT_WINDOW = 40; // ms
+const GOOD_WINDOW = 80;    // ms
+
+const COLORS = ['#ff6b6b','#ffd93d','#6bcbff','#a78bfa'];
+const LANE_LABELS = ['A','S','D','F'];
+
+// beatmap: [time_ms, lane_0to3]
+function generateBeatmap() {
+  const bpm = 120;
+  const beat = 60000 / bpm;
+  const notes = [];
+  for (let i = 0; i < 32; i++) {
+    const t = 2000 + i * beat;
+    const lane = Math.floor(Math.random() * LANE_COUNT);
+    notes.push({ time: t, lane, hit: false, missed: false });
+    // occasionally double notes
+    if (Math.random() < 0.2) {
+      const lane2 = (lane + 2) % LANE_COUNT;
+      notes.push({ time: t, lane: lane2, hit: false, missed: false });
+    }
+  }
+  notes.sort((a,b) => a.time - b.time);
+  return notes;
+}
+
+let notes = [];
+let startTime = null;
+let gameRunning = false;
+let score = 0, combo = 0, perfect = 0, miss = 0;
+let particles = [];
+let judgmentText = '';
+let judgmentTimer = 0;
+let currentLane = 0; // rotate bite input across lanes for demo
+
+// ── Mouth Detection ───────────────────────────────────────────────
+let mouthOpenness = 0;    // 0-1
+let prevOpenness = 0;
+let biteDetected = false;
+let biteConfirmed = false; // edge: detect close event (was open, now closed)
+const BITE_THRESHOLD_CLOSE = 0.08;
+const BITE_THRESHOLD_OPEN  = 0.14;
+let biteState = 'open'; // 'open' | 'closed'
+
+// Mouth landmarks (MediaPipe FaceMesh)
+// upper inner lip: 13, lower inner lip: 14
+// We also use upper outer: 0, lower outer: 17
+const UPPER_LIP = 13;
+const LOWER_LIP = 14;
+
+function setupFaceMesh() {
+  const videoEl = document.getElementById('webcam');
+  const faceCanvas = document.getElementById('face-canvas');
+  const faceCtx = faceCanvas.getContext('2d');
+
+  const faceMesh = new FaceMesh({ locateFile: f =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}` });
+
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: false,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+
+  faceMesh.onResults(results => {
+    faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+
+    if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) {
+      document.getElementById('status-msg').textContent = '顔が検出されていません';
+      return;
+    }
+
+    document.getElementById('status-msg').textContent = '顔検出OK ✓';
+    const lm = results.multiFaceLandmarks[0];
+
+    // Draw face mesh dots (simplified)
+    faceCtx.fillStyle = 'rgba(0,255,170,0.6)';
+    [UPPER_LIP, LOWER_LIP, 0, 17, 61, 291, 78, 308].forEach(i => {
+      const p = lm[i];
+      faceCtx.beginPath();
+      faceCtx.arc(p.x * faceCanvas.width, p.y * faceCanvas.height, 3, 0, Math.PI*2);
+      faceCtx.fill();
+    });
+
+    // Mouth openness: distance between upper/lower inner lip, normalized by face height
+    const upper = lm[UPPER_LIP];
+    const lower = lm[LOWER_LIP];
+    const nose  = lm[1];
+    const chin  = lm[152];
+    const faceH = Math.abs(chin.y - nose.y) || 0.3;
+    const dist  = Math.abs(lower.y - upper.y);
+    mouthOpenness = Math.min(1, dist / faceH);
+
+    // Draw lip line
+    faceCtx.strokeStyle = '#ff6b35';
+    faceCtx.lineWidth = 2;
+    faceCtx.beginPath();
+    faceCtx.moveTo(upper.x * faceCanvas.width, upper.y * faceCanvas.height);
+    faceCtx.lineTo(lower.x * faceCanvas.width, lower.y * faceCanvas.height);
+    faceCtx.stroke();
+
+    // Bite edge detection: open→closed transition
+    if (biteState === 'open' && mouthOpenness < BITE_THRESHOLD_CLOSE) {
+      biteState = 'closed';
+      biteDetected = true;
+    } else if (biteState === 'closed' && mouthOpenness > BITE_THRESHOLD_OPEN) {
+      biteState = 'open';
+    }
+
+    // Update UI meter
+    const pct = Math.min(100, mouthOpenness * 400);
+    document.getElementById('meter-bar').style.width = pct + '%';
+    const biteInd = document.getElementById('bite-indicator');
+    if (biteState === 'closed') {
+      biteInd.style.opacity = '1';
+    } else {
+      biteInd.style.opacity = '0';
+    }
+  });
+
+  const camera = new Camera(videoEl, {
+    onFrame: async () => { await faceMesh.send({ image: videoEl }); },
+    width: 640, height: 480
+  });
+  camera.start().then(() => {
+    document.getElementById('status-msg').textContent = '顔を画面に映してください';
+  }).catch(e => {
+    document.getElementById('status-msg').textContent = 'カメラエラー: ' + e.message;
+  });
+}
+
+// ── Game Logic ────────────────────────────────────────────────────
+function startGame() {
+  audioCtx.resume();
+  notes = generateBeatmap();
+  score = 0; combo = 0; perfect = 0; miss = 0;
+  particles = [];
+  updateUI();
+  startTime = performance.now();
+  gameRunning = true;
+  currentLane = 0;
+  requestAnimationFrame(gameLoop);
+}
+
+function processInput() {
+  if (!gameRunning || !biteDetected) return;
+  biteDetected = false;
+
+  const now = performance.now() - startTime;
+  let bestNote = null, bestDelta = Infinity;
+
+  for (const note of notes) {
+    if (note.hit || note.missed) continue;
+    const delta = Math.abs(note.time - now);
+    if (delta < GOOD_WINDOW * 2 && delta < bestDelta) {
+      bestDelta = delta;
+      bestNote = note;
+    }
+  }
+
+  if (bestNote && bestDelta <= GOOD_WINDOW * 1.5) {
+    bestNote.hit = true;
+    if (bestDelta <= PERFECT_WINDOW) {
+      score += 300 * (1 + combo * 0.1 | 0);
+      combo++;
+      perfect++;
+      showJudgment('PERFECT', '#ffdd00');
+      playHitSound('perfect');
+      spawnParticles(LANE_OFFSET_X + bestNote.lane * LANE_W + LANE_W/2, JUDGE_Y, '#ffdd00');
+    } else {
+      score += 100 * (1 + combo * 0.05 | 0);
+      combo++;
+      showJudgment('GOOD', '#00ccff');
+      playHitSound('good');
+      spawnParticles(LANE_OFFSET_X + bestNote.lane * LANE_W + LANE_W/2, JUDGE_Y, '#00ccff');
+    }
+  } else {
+    // Empty bite = miss
+    combo = 0;
+    miss++;
+    showJudgment('MISS', '#ff4466');
+    playHitSound('miss');
+  }
+  updateUI();
+}
+
+function showJudgment(text, color) {
+  const el = document.getElementById('judgment-overlay');
+  el.textContent = text;
+  el.style.color = color;
+  el.style.opacity = '1';
+  judgmentTimer = 600;
+}
+
+function spawnParticles(x, y, color) {
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 80 + Math.random() * 120;
+    particles.push({
+      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+      life: 1, color, size: 4 + Math.random()*4
+    });
+  }
+}
+
+function updateUI() {
+  document.getElementById('score-value').textContent = score;
+  document.getElementById('combo-value').textContent = combo;
+  document.getElementById('perfect-value').textContent = perfect;
+  document.getElementById('miss-value').textContent = miss;
+}
+
+let lastTime = 0;
+function gameLoop(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+  lastTime = timestamp;
+
+  if (!gameRunning) return;
+
+  const elapsed = timestamp - startTime;
+
+  // Process bite input
+  processInput();
+
+  // Check missed notes
+  for (const note of notes) {
+    if (!note.hit && !note.missed && note.time < elapsed - GOOD_WINDOW * 2) {
+      note.missed = true;
+      combo = 0;
+      miss++;
+      updateUI();
+      showJudgment('MISS', '#ff4466');
+    }
+  }
+
+  // Update particles
+  for (const p of particles) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 300 * dt;
+    p.life -= dt * 1.5;
+  }
+  particles = particles.filter(p => p.life > 0);
+
+  // Judgment overlay fade
+  if (judgmentTimer > 0) {
+    judgmentTimer -= dt * 1000;
+    const el = document.getElementById('judgment-overlay');
+    el.style.opacity = Math.max(0, judgmentTimer / 600);
+  }
+
+  draw(elapsed);
+
+  // End check
+  const remaining = notes.filter(n => !n.hit && !n.missed);
+  if (remaining.length === 0 && elapsed > 1000) {
+    gameRunning = false;
+    setTimeout(showResult, 500);
+    return;
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+function draw(elapsed) {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+
+  // Lane backgrounds
+  for (let i = 0; i < LANE_COUNT; i++) {
+    const lx = LANE_OFFSET_X + i * LANE_W;
+    ctx.fillStyle = `rgba(${[255,217,107,171][i]},${[107,217,203,139][i]},${[107,61,255,250][i]},0.04)`;
+    ctx.fillRect(lx, 0, LANE_W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(lx, 0, LANE_W, H);
+  }
+
+  // Lane labels
+  for (let i = 0; i < LANE_COUNT; i++) {
+    const lx = LANE_OFFSET_X + i * LANE_W + LANE_W/2;
+    ctx.fillStyle = COLORS[i] + '80';
+    ctx.font = 'bold 14px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(LANE_LABELS[i], lx, H - 20);
+  }
+
+  // Judge line
+  const gradient = ctx.createLinearGradient(LANE_OFFSET_X, JUDGE_Y, LANE_OFFSET_X + LANE_W*LANE_COUNT, JUDGE_Y);
+  gradient.addColorStop(0, '#ff6b6b');
+  gradient.addColorStop(0.33, '#ffd93d');
+  gradient.addColorStop(0.66, '#6bcbff');
+  gradient.addColorStop(1, '#a78bfa');
+  ctx.strokeStyle = gradient;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(LANE_OFFSET_X, JUDGE_Y);
+  ctx.lineTo(LANE_OFFSET_X + LANE_W * LANE_COUNT, JUDGE_Y);
+  ctx.stroke();
+
+  // Judge line glow
+  ctx.shadowColor = '#ffffff';
+  ctx.shadowBlur = 8;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Judge circles
+  for (let i = 0; i < LANE_COUNT; i++) {
+    const lx = LANE_OFFSET_X + i * LANE_W + LANE_W/2;
+    ctx.strokeStyle = COLORS[i];
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(lx, JUDGE_Y, 22, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.fillStyle = COLORS[i] + '20';
+    ctx.fill();
+  }
+
+  // Falling notes
+  for (const note of notes) {
+    if (note.hit || note.missed) continue;
+    const timeToJudge = note.time - elapsed;
+    const y = JUDGE_Y - (timeToJudge / 1000) * BAR_SPEED;
+    if (y < -BAR_H || y > H + BAR_H) continue;
+
+    const lx = LANE_OFFSET_X + note.lane * LANE_W + 4;
+    const lw = LANE_W - 8;
+    const ly = y - BAR_H/2;
+
+    // Note shadow
+    ctx.shadowColor = COLORS[note.lane];
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = COLORS[note.lane];
+    ctx.beginPath();
+    roundRect(ctx, lx, ly, lw, BAR_H, 6);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    roundRect(ctx, lx+2, ly+2, lw-4, BAR_H/3, 4);
+    ctx.fill();
+  }
+
+  // Particles
+  for (const p of particles) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Bite flash effect
+  if (biteState === 'closed') {
+    ctx.fillStyle = 'rgba(255,107,53,0.05)';
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+}
+
+function showResult() {
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 36px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('RESULT', W/2, H/2 - 80);
+  ctx.font = '20px Courier New';
+  ctx.fillStyle = '#00ffaa';
+  ctx.fillText(`SCORE: ${score}`, W/2, H/2 - 30);
+  ctx.fillStyle = '#ffdd00';
+  ctx.fillText(`PERFECT: ${perfect}`, W/2, H/2 + 10);
+  ctx.fillStyle = '#ff4466';
+  ctx.fillText(`MISS: ${miss}`, W/2, H/2 + 50);
+  const acc = notes.length > 0
+    ? ((perfect + (notes.filter(n=>n.hit && !notes.find(x=>x===n && x.missed)).length - perfect)) / notes.length * 100).toFixed(1)
+    : '0.0';
+  ctx.fillStyle = '#fff';
+  ctx.fillText('[ RETRY → START ]', W/2, H/2 + 110);
+}
+
+// Keyboard fallback (spacebar = bite)
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !e.repeat) {
+    biteDetected = true;
+  }
+});
+
+// Initial canvas message
+ctx.fillStyle = '#fff';
+ctx.font = '18px Courier New';
+ctx.textAlign = 'center';
+ctx.fillStyle = 'rgba(255,255,255,0.3)';
+ctx.fillText('カメラを起動してSTARTを押してください', W/2, H/2);
+ctx.font = '13px Courier New';
+ctx.fillStyle = 'rgba(255,255,255,0.15)';
+ctx.fillText('（スペースキーでもテスト可能）', W/2, H/2 + 30);
+
+// Init FaceMesh
+window.addEventListener('load', setupFaceMesh);
+</script>
+</body>
+</html>
