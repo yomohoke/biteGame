@@ -247,8 +247,7 @@ const COLORS = ['#ff6b6b','#ffd93d','#6bcbff'];
 // ── Pac-Man ───────────────────────────────────────────────────────
 let pacLane = 1;             // current lane index
 let pacX = 0;                // actual x (animated)
-let pacMouthAngle = 0.25;    // mouth opening angle (radians × PI)
-let pacMouthDir = 1;
+let pacBiteAnim = 0; // 0=open, counts down on bite
 const PAC_R = 26;
 
 function pacTargetX() {
@@ -494,9 +493,8 @@ function gameLoop(timestamp) {
   pacX += (tx - pacX) * Math.min(1, dt * 18);
 
   // Pac-man mouth animation (idle chomp)
-  pacMouthAngle += pacMouthDir * dt * 3;
-  if (pacMouthAngle > 0.3) pacMouthDir = -1;
-  if (pacMouthAngle < 0.02) pacMouthDir = 1;
+  if (biteDetected || biteState === 'closed') pacBiteAnim = 0.18;
+  pacBiteAnim = Math.max(0, pacBiteAnim - dt * 4);
 
   processInput(elapsed);
 
@@ -603,7 +601,7 @@ function gameLoop(timestamp) {
   }
 
   // Pac-man
-  const mouthOpen = biteState === 'closed' ? 0.01 : pacMouthAngle;
+  const mouthOpen = pacBiteAnim > 0 ? pacBiteAnim : 0.25;
   drawPacman(pacX, JUDGE_Y, PAC_R, mouthOpen, COLORS[pacLane]);
 
   // Particles
