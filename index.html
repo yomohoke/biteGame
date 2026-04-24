@@ -183,13 +183,14 @@
 
     <div id="instructions">
       <strong>HOW TO PLAY</strong><br>
-      カメラに顔を映して<br>
-      バーが判定ラインに<br>
-      来たら噛む（口を閉じる）<br><br>
+      ← → で移動<br>
+      バーが来たら噛む<br><br>
       <strong>TIMING</strong><br>
-      <span style="color:#ffdd00">PERFECT</span> ±40ms<br>
-      <span style="color:#00ccff">GOOD</span> ±80ms<br>
-      <span style="color:#ff4466">MISS</span> それ以外
+      <span style="color:#ffdd00">PERFECT</span> ±50ms<br>
+      <span style="color:#00ccff">GOOD</span> ±100ms<br>
+      <span style="color:#ff4466">MISS</span> それ以外<br><br>
+      <strong>TIP</strong><br>
+      スペースキーでも可
     </div>
 
     <div id="status-msg">カメラ初期化中...</div>
@@ -199,13 +200,11 @@
 
 <div id="judgment-overlay"></div>
 
-<!-- MediaPipe FaceMesh via CDN -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 
 <script>
-// ── AudioContext (Web Audio API) ──────────────────────────────────
+// ── Audio ─────────────────────────────────────────────────────────
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 function playHitSound(type) {
@@ -215,20 +214,20 @@ function playHitSound(type) {
   if (type === 'perfect') {
     o.frequency.value = 880;
     g.gain.setValueAtTime(0.3, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
   } else if (type === 'good') {
     o.frequency.value = 660;
     g.gain.setValueAtTime(0.2, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
   } else {
-    o.frequency.value = 220;
-    g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    o.frequency.value = 200;
+    g.gain.setValueAtTime(0.1, audioCtx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
   }
   o.start(); o.stop(audioCtx.currentTime + 0.3);
 }
 
-// ── Game State ────────────────────────────────────────────────────
+// ── Canvas & Layout ───────────────────────────────────────────────
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
@@ -236,57 +235,55 @@ const W = canvas.width, H = canvas.height;
 const LANE_COUNT = 4;
 const LANE_W = (W - 80) / LANE_COUNT;
 const LANE_OFFSET_X = 40;
-const JUDGE_Y = H - 80;
-const BAR_H = 20;
-const BAR_SPEED = 280; // px/sec
-const PERFECT_WINDOW = 40; // ms
-const GOOD_WINDOW = 80;    // ms
+const JUDGE_Y = H - 100;
+const BAR_H = 18;
+const BAR_SPEED = 160;       // slower
+const PERFECT_WINDOW = 50;
+const GOOD_WINDOW = 100;
 
 const COLORS = ['#ff6b6b','#ffd93d','#6bcbff','#a78bfa'];
-const LANE_LABELS = ['A','S','D','F'];
 
-// beatmap: [time_ms, lane_0to3]
+// ── Pac-Man ───────────────────────────────────────────────────────
+let pacLane = 1;             // current lane index
+let pacX = 0;                // actual x (animated)
+let pacMouthAngle = 0.25;    // mouth opening angle (radians × PI)
+let pacMouthDir = 1;
+const PAC_R = 26;
+
+function pacTargetX() {
+  return LANE_OFFSET_X + pacLane * LANE_W + LANE_W / 2;
+}
+
+// ── Beatmap ───────────────────────────────────────────────────────
 function generateBeatmap() {
-  const bpm = 120;
+  const bpm = 90;
   const beat = 60000 / bpm;
   const notes = [];
-  for (let i = 0; i < 32; i++) {
-    const t = 2000 + i * beat;
+  // sparser: one note per beat with some gaps
+  for (let i = 0; i < 20; i++) {
+    if (Math.random() < 0.25) continue; // 25% chance to skip a beat
+    const t = 2500 + i * beat;
     const lane = Math.floor(Math.random() * LANE_COUNT);
     notes.push({ time: t, lane, hit: false, missed: false });
-    // occasionally double notes
-    if (Math.random() < 0.2) {
-      const lane2 = (lane + 2) % LANE_COUNT;
-      notes.push({ time: t, lane: lane2, hit: false, missed: false });
-    }
   }
   notes.sort((a,b) => a.time - b.time);
   return notes;
 }
 
+// ── Game State ────────────────────────────────────────────────────
 let notes = [];
 let startTime = null;
 let gameRunning = false;
 let score = 0, combo = 0, perfect = 0, miss = 0;
 let particles = [];
-let judgmentText = '';
 let judgmentTimer = 0;
-let currentLane = 0; // rotate bite input across lanes for demo
 
 // ── Mouth Detection ───────────────────────────────────────────────
-let mouthOpenness = 0;    // 0-1
-let prevOpenness = 0;
+let mouthOpenness = 0;
 let biteDetected = false;
-let biteConfirmed = false; // edge: detect close event (was open, now closed)
-const BITE_THRESHOLD_CLOSE = 0.08;
-const BITE_THRESHOLD_OPEN  = 0.14;
-let biteState = 'open'; // 'open' | 'closed'
-
-// Mouth landmarks (MediaPipe FaceMesh)
-// upper inner lip: 13, lower inner lip: 14
-// We also use upper outer: 0, lower outer: 17
-const UPPER_LIP = 13;
-const LOWER_LIP = 14;
+let biteState = 'open';
+const BITE_THRESHOLD_CLOSE = 0.05;  // lower = easier to trigger
+const BITE_THRESHOLD_OPEN  = 0.09;
 
 function setupFaceMesh() {
   const videoEl = document.getElementById('webcam');
@@ -310,37 +307,26 @@ function setupFaceMesh() {
       document.getElementById('status-msg').textContent = '顔が検出されていません';
       return;
     }
-
     document.getElementById('status-msg').textContent = '顔検出OK ✓';
     const lm = results.multiFaceLandmarks[0];
 
-    // Draw face mesh dots (simplified)
-    faceCtx.fillStyle = 'rgba(0,255,170,0.6)';
-    [UPPER_LIP, LOWER_LIP, 0, 17, 61, 291, 78, 308].forEach(i => {
+    const upper = lm[13];
+    const lower = lm[14];
+    const nose  = lm[1];
+    const chin  = lm[152];
+    const faceH = Math.abs(chin.y - nose.y) || 0.3;
+    mouthOpenness = Math.min(1, Math.abs(lower.y - upper.y) / faceH);
+
+    // Draw overlay dots
+    faceCtx.fillStyle = 'rgba(0,255,170,0.7)';
+    [13,14,61,291].forEach(i => {
       const p = lm[i];
       faceCtx.beginPath();
       faceCtx.arc(p.x * faceCanvas.width, p.y * faceCanvas.height, 3, 0, Math.PI*2);
       faceCtx.fill();
     });
 
-    // Mouth openness: distance between upper/lower inner lip, normalized by face height
-    const upper = lm[UPPER_LIP];
-    const lower = lm[LOWER_LIP];
-    const nose  = lm[1];
-    const chin  = lm[152];
-    const faceH = Math.abs(chin.y - nose.y) || 0.3;
-    const dist  = Math.abs(lower.y - upper.y);
-    mouthOpenness = Math.min(1, dist / faceH);
-
-    // Draw lip line
-    faceCtx.strokeStyle = '#ff6b35';
-    faceCtx.lineWidth = 2;
-    faceCtx.beginPath();
-    faceCtx.moveTo(upper.x * faceCanvas.width, upper.y * faceCanvas.height);
-    faceCtx.lineTo(lower.x * faceCanvas.width, lower.y * faceCanvas.height);
-    faceCtx.stroke();
-
-    // Bite edge detection: open→closed transition
+    // Bite edge detection
     if (biteState === 'open' && mouthOpenness < BITE_THRESHOLD_CLOSE) {
       biteState = 'closed';
       biteDetected = true;
@@ -348,15 +334,9 @@ function setupFaceMesh() {
       biteState = 'open';
     }
 
-    // Update UI meter
-    const pct = Math.min(100, mouthOpenness * 400);
+    const pct = Math.min(100, mouthOpenness * 600);
     document.getElementById('meter-bar').style.width = pct + '%';
-    const biteInd = document.getElementById('bite-indicator');
-    if (biteState === 'closed') {
-      biteInd.style.opacity = '1';
-    } else {
-      biteInd.style.opacity = '0';
-    }
+    document.getElementById('bite-indicator').style.opacity = biteState === 'closed' ? '1' : '0';
   });
 
   const camera = new Camera(videoEl, {
@@ -370,29 +350,43 @@ function setupFaceMesh() {
   });
 }
 
+// ── Input ─────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (e.code === 'ArrowLeft') {
+    pacLane = Math.max(0, pacLane - 1);
+  } else if (e.code === 'ArrowRight') {
+    pacLane = Math.min(LANE_COUNT - 1, pacLane + 1);
+  } else if (e.code === 'Space' && !e.repeat) {
+    biteDetected = true;
+    e.preventDefault();
+  }
+});
+
 // ── Game Logic ────────────────────────────────────────────────────
 function startGame() {
   audioCtx.resume();
   notes = generateBeatmap();
   score = 0; combo = 0; perfect = 0; miss = 0;
   particles = [];
+  pacLane = 1;
+  pacX = pacTargetX();
   updateUI();
   startTime = performance.now();
   gameRunning = true;
-  currentLane = 0;
+  lastTime = performance.now();
   requestAnimationFrame(gameLoop);
 }
 
-function processInput() {
+function processInput(elapsed) {
   if (!gameRunning || !biteDetected) return;
   biteDetected = false;
 
-  const now = performance.now() - startTime;
+  // Only check notes in the same lane as pac-man
   let bestNote = null, bestDelta = Infinity;
-
   for (const note of notes) {
     if (note.hit || note.missed) continue;
-    const delta = Math.abs(note.time - now);
+    if (note.lane !== pacLane) continue;
+    const delta = Math.abs(note.time - elapsed);
     if (delta < GOOD_WINDOW * 2 && delta < bestDelta) {
       bestDelta = delta;
       bestNote = note;
@@ -402,23 +396,20 @@ function processInput() {
   if (bestNote && bestDelta <= GOOD_WINDOW * 1.5) {
     bestNote.hit = true;
     if (bestDelta <= PERFECT_WINDOW) {
-      score += 300 * (1 + combo * 0.1 | 0);
-      combo++;
-      perfect++;
+      score += 300 + combo * 10;
+      combo++; perfect++;
       showJudgment('PERFECT', '#ffdd00');
       playHitSound('perfect');
-      spawnParticles(LANE_OFFSET_X + bestNote.lane * LANE_W + LANE_W/2, JUDGE_Y, '#ffdd00');
+      spawnParticles(pacX, JUDGE_Y, '#ffdd00');
     } else {
-      score += 100 * (1 + combo * 0.05 | 0);
+      score += 100 + combo * 5;
       combo++;
       showJudgment('GOOD', '#00ccff');
       playHitSound('good');
-      spawnParticles(LANE_OFFSET_X + bestNote.lane * LANE_W + LANE_W/2, JUDGE_Y, '#00ccff');
+      spawnParticles(pacX, JUDGE_Y, '#00ccff');
     }
   } else {
-    // Empty bite = miss
-    combo = 0;
-    miss++;
+    combo = 0; miss++;
     showJudgment('MISS', '#ff4466');
     playHitSound('miss');
   }
@@ -430,17 +421,16 @@ function showJudgment(text, color) {
   el.textContent = text;
   el.style.color = color;
   el.style.opacity = '1';
-  judgmentTimer = 600;
+  judgmentTimer = 700;
 }
 
 function spawnParticles(x, y, color) {
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 14; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const speed = 80 + Math.random() * 120;
-    particles.push({
-      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
-      life: 1, color, size: 4 + Math.random()*4
-    });
+    const speed = 80 + Math.random() * 140;
+    particles.push({ x, y,
+      vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+      life: 1, color, size: 4 + Math.random()*5 });
   }
 }
 
@@ -451,150 +441,150 @@ function updateUI() {
   document.getElementById('miss-value').textContent = miss;
 }
 
+// ── Draw ──────────────────────────────────────────────────────────
+function drawPacman(x, y, r, mouthOpen, color) {
+  const angle = mouthOpen * Math.PI;
+  // Body
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 15;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.arc(x, y, r, angle, Math.PI * 2 - angle);
+  ctx.closePath();
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // Eye
+  ctx.fillStyle = '#0a0a0f';
+  ctx.beginPath();
+  ctx.arc(x + r * 0.2, y - r * 0.45, r * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.moveTo(x+r, y);
+  c.lineTo(x+w-r, y);
+  c.quadraticCurveTo(x+w, y, x+w, y+r);
+  c.lineTo(x+w, y+h-r);
+  c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  c.lineTo(x+r, y+h);
+  c.quadraticCurveTo(x, y+h, x, y+h-r);
+  c.lineTo(x, y+r);
+  c.quadraticCurveTo(x, y, x+r, y);
+}
+
+// ── Loop ──────────────────────────────────────────────────────────
 let lastTime = 0;
+
 function gameLoop(timestamp) {
   const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
   lastTime = timestamp;
 
   if (!gameRunning) return;
-
   const elapsed = timestamp - startTime;
 
-  // Process bite input
-  processInput();
+  // Smooth pac-man movement
+  const tx = pacTargetX();
+  pacX += (tx - pacX) * Math.min(1, dt * 18);
 
-  // Check missed notes
+  // Pac-man mouth animation (idle chomp)
+  pacMouthAngle += pacMouthDir * dt * 3;
+  if (pacMouthAngle > 0.3) pacMouthDir = -1;
+  if (pacMouthAngle < 0.02) pacMouthDir = 1;
+
+  processInput(elapsed);
+
+  // Miss check
   for (const note of notes) {
     if (!note.hit && !note.missed && note.time < elapsed - GOOD_WINDOW * 2) {
       note.missed = true;
-      combo = 0;
-      miss++;
+      combo = 0; miss++;
       updateUI();
       showJudgment('MISS', '#ff4466');
     }
   }
 
-  // Update particles
+  // Particles
   for (const p of particles) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.vy += 300 * dt;
-    p.life -= dt * 1.5;
+    p.vy += 250 * dt;
+    p.life -= dt * 1.8;
   }
   particles = particles.filter(p => p.life > 0);
 
-  // Judgment overlay fade
+  // Judgment fade
   if (judgmentTimer > 0) {
     judgmentTimer -= dt * 1000;
-    const el = document.getElementById('judgment-overlay');
-    el.style.opacity = Math.max(0, judgmentTimer / 600);
+    document.getElementById('judgment-overlay').style.opacity =
+      Math.max(0, judgmentTimer / 700);
   }
 
-  draw(elapsed);
-
-  // End check
-  const remaining = notes.filter(n => !n.hit && !n.missed);
-  if (remaining.length === 0 && elapsed > 1000) {
-    gameRunning = false;
-    setTimeout(showResult, 500);
-    return;
-  }
-
-  requestAnimationFrame(gameLoop);
-}
-
-function draw(elapsed) {
+  // ── Render ─────────────────────────────────────────────────────
   ctx.clearRect(0, 0, W, H);
 
-  // Background grid
+  // Grid
   ctx.strokeStyle = 'rgba(255,255,255,0.03)';
   ctx.lineWidth = 1;
-  for (let x = 0; x < W; x += 40) {
-    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
-  }
-  for (let y = 0; y < H; y += 40) {
-    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
-  }
+  for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
   // Lane backgrounds
   for (let i = 0; i < LANE_COUNT; i++) {
     const lx = LANE_OFFSET_X + i * LANE_W;
-    ctx.fillStyle = `rgba(${[255,217,107,171][i]},${[107,217,203,139][i]},${[107,61,255,250][i]},0.04)`;
+    const active = i === pacLane;
+    ctx.fillStyle = active ? `${COLORS[i]}18` : `${COLORS[i]}08`;
     ctx.fillRect(lx, 0, LANE_W, H);
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = active ? `${COLORS[i]}60` : 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = active ? 2 : 1;
     ctx.strokeRect(lx, 0, LANE_W, H);
   }
 
-  // Lane labels
-  for (let i = 0; i < LANE_COUNT; i++) {
-    const lx = LANE_OFFSET_X + i * LANE_W + LANE_W/2;
-    ctx.fillStyle = COLORS[i] + '80';
-    ctx.font = 'bold 14px Courier New';
-    ctx.textAlign = 'center';
-    ctx.fillText(LANE_LABELS[i], lx, H - 20);
-  }
-
   // Judge line
-  const gradient = ctx.createLinearGradient(LANE_OFFSET_X, JUDGE_Y, LANE_OFFSET_X + LANE_W*LANE_COUNT, JUDGE_Y);
-  gradient.addColorStop(0, '#ff6b6b');
-  gradient.addColorStop(0.33, '#ffd93d');
-  gradient.addColorStop(0.66, '#6bcbff');
-  gradient.addColorStop(1, '#a78bfa');
-  ctx.strokeStyle = gradient;
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 4]);
   ctx.beginPath();
   ctx.moveTo(LANE_OFFSET_X, JUDGE_Y);
   ctx.lineTo(LANE_OFFSET_X + LANE_W * LANE_COUNT, JUDGE_Y);
   ctx.stroke();
-
-  // Judge line glow
-  ctx.shadowColor = '#ffffff';
-  ctx.shadowBlur = 8;
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-
-  // Judge circles
-  for (let i = 0; i < LANE_COUNT; i++) {
-    const lx = LANE_OFFSET_X + i * LANE_W + LANE_W/2;
-    ctx.strokeStyle = COLORS[i];
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(lx, JUDGE_Y, 22, 0, Math.PI*2);
-    ctx.stroke();
-    ctx.fillStyle = COLORS[i] + '20';
-    ctx.fill();
-  }
+  ctx.setLineDash([]);
 
   // Falling notes
   for (const note of notes) {
     if (note.hit || note.missed) continue;
     const timeToJudge = note.time - elapsed;
     const y = JUDGE_Y - (timeToJudge / 1000) * BAR_SPEED;
-    if (y < -BAR_H || y > H + BAR_H) continue;
+    if (y < -BAR_H * 2 || y > H + BAR_H) continue;
 
-    const lx = LANE_OFFSET_X + note.lane * LANE_W + 4;
-    const lw = LANE_W - 8;
-    const ly = y - BAR_H/2;
+    const lx = LANE_OFFSET_X + note.lane * LANE_W + 6;
+    const lw = LANE_W - 12;
+    const ly = y - BAR_H / 2;
 
-    // Note shadow
+    // approaching glow
+    const proximity = Math.max(0, 1 - Math.abs(timeToJudge) / 600);
     ctx.shadowColor = COLORS[note.lane];
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = 6 + proximity * 20;
     ctx.fillStyle = COLORS[note.lane];
     ctx.beginPath();
     roundRect(ctx, lx, ly, lw, BAR_H, 6);
     ctx.fill();
-
     ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+
+    // shine
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.beginPath();
-    roundRect(ctx, lx+2, ly+2, lw-4, BAR_H/3, 4);
+    roundRect(ctx, lx+3, ly+3, lw-6, BAR_H*0.35, 3);
     ctx.fill();
   }
 
+  // Pac-man
+  const mouthOpen = biteState === 'closed' ? 0.01 : pacMouthAngle;
+  drawPacman(pacX, JUDGE_Y, PAC_R, mouthOpen, COLORS[pacLane]);
+
   // Particles
   for (const p of particles) {
-    ctx.globalAlpha = p.life;
+    ctx.globalAlpha = Math.max(0, p.life);
     ctx.fillStyle = p.color;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
@@ -602,64 +592,50 @@ function draw(elapsed) {
   }
   ctx.globalAlpha = 1;
 
-  // Bite flash effect
+  // Bite flash
   if (biteState === 'closed') {
-    ctx.fillStyle = 'rgba(255,107,53,0.05)';
+    ctx.fillStyle = 'rgba(255,107,53,0.04)';
     ctx.fillRect(0, 0, W, H);
   }
-}
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.moveTo(x+r, y);
-  ctx.lineTo(x+w-r, y);
-  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
-  ctx.lineTo(x+w, y+h-r);
-  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
-  ctx.lineTo(x+r, y+h);
-  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
-  ctx.lineTo(x, y+r);
-  ctx.quadraticCurveTo(x, y, x+r, y);
+  // End check
+  if (notes.length > 0 && notes.every(n => n.hit || n.missed) && elapsed > 1000) {
+    gameRunning = false;
+    setTimeout(showResult, 600);
+    return;
+  }
+
+  requestAnimationFrame(gameLoop);
 }
 
 function showResult() {
-  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
   ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 36px Courier New';
   ctx.textAlign = 'center';
-  ctx.fillText('RESULT', W/2, H/2 - 80);
-  ctx.font = '20px Courier New';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 40px Courier New';
+  ctx.fillText('RESULT', W/2, H/2 - 90);
+  ctx.font = '22px Courier New';
   ctx.fillStyle = '#00ffaa';
-  ctx.fillText(`SCORE: ${score}`, W/2, H/2 - 30);
+  ctx.fillText(`SCORE: ${score}`, W/2, H/2 - 35);
   ctx.fillStyle = '#ffdd00';
   ctx.fillText(`PERFECT: ${perfect}`, W/2, H/2 + 10);
   ctx.fillStyle = '#ff4466';
-  ctx.fillText(`MISS: ${miss}`, W/2, H/2 + 50);
-  const acc = notes.length > 0
-    ? ((perfect + (notes.filter(n=>n.hit && !notes.find(x=>x===n && x.missed)).length - perfect)) / notes.length * 100).toFixed(1)
-    : '0.0';
-  ctx.fillStyle = '#fff';
-  ctx.fillText('[ RETRY → START ]', W/2, H/2 + 110);
+  ctx.fillText(`MISS: ${miss}`, W/2, H/2 + 55);
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '14px Courier New';
+  ctx.fillText('[ RETRY → START ]', W/2, H/2 + 115);
 }
 
-// Keyboard fallback (spacebar = bite)
-document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && !e.repeat) {
-    biteDetected = true;
-  }
-});
-
-// Initial canvas message
-ctx.fillStyle = '#fff';
-ctx.font = '18px Courier New';
+// Initial message
+ctx.fillStyle = 'rgba(255,255,255,0.25)';
+ctx.font = '16px Courier New';
 ctx.textAlign = 'center';
-ctx.fillStyle = 'rgba(255,255,255,0.3)';
-ctx.fillText('カメラを起動してSTARTを押してください', W/2, H/2);
-ctx.font = '13px Courier New';
-ctx.fillStyle = 'rgba(255,255,255,0.15)';
-ctx.fillText('（スペースキーでもテスト可能）', W/2, H/2 + 30);
+ctx.fillText('← → で移動、噛んでキャッチ', W/2, H/2 - 15);
+ctx.font = '12px Courier New';
+ctx.fillStyle = 'rgba(255,255,255,0.12)';
+ctx.fillText('スペースキーでもテスト可', W/2, H/2 + 20);
 
-// Init FaceMesh
 window.addEventListener('load', setupFaceMesh);
 </script>
 </body>
