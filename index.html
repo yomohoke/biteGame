@@ -183,7 +183,7 @@
 
     <div id="instructions">
       <strong>HOW TO PLAY</strong><br>
-      ← → で移動<br>
+      A / S / D でレーン移動<br>
       バーが来たら噛む<br><br>
       <strong>TIMING</strong><br>
       <span style="color:#ffdd00">PERFECT</span> ±50ms<br>
@@ -232,16 +232,17 @@ const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
 
-const LANE_COUNT = 4;
+const LANE_COUNT = 3;
+const LANE_KEYS = ['A', 'S', 'D'];
 const LANE_W = (W - 80) / LANE_COUNT;
 const LANE_OFFSET_X = 40;
 const JUDGE_Y = H - 100;
 const BAR_H = 18;
-const BAR_SPEED = 160;       // slower
+const BAR_SPEED = 120;
 const PERFECT_WINDOW = 80;
 const GOOD_WINDOW = 180;
 
-const COLORS = ['#ff6b6b','#ffd93d','#6bcbff','#a78bfa'];
+const COLORS = ['#ff6b6b','#ffd93d','#6bcbff'];
 
 // ── Pac-Man ───────────────────────────────────────────────────────
 let pacLane = 1;             // current lane index
@@ -355,18 +356,12 @@ function setupFaceMesh() {
 
 // ── Input ─────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
-  if (e.code === 'ArrowLeft') {
-    pacLane = Math.max(0, pacLane - 1);
-  } else if (e.code === 'ArrowRight') {
-    pacLane = Math.min(LANE_COUNT - 1, pacLane + 1);
-  } else if (e.code === 'KeyA') {
+  if (e.code === 'KeyA') {
     pacLane = 0;
   } else if (e.code === 'KeyS') {
     pacLane = 1;
   } else if (e.code === 'KeyD') {
     pacLane = 2;
-  } else if (e.code === 'KeyF') {
-    pacLane = 3;
   } else if (e.code === 'Space' && !e.repeat) {
     biteDetected = true;
     e.preventDefault();
@@ -540,15 +535,33 @@ function gameLoop(timestamp) {
   for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
   for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
-  // Lane backgrounds
+  // Lane backgrounds + key labels
   for (let i = 0; i < LANE_COUNT; i++) {
     const lx = LANE_OFFSET_X + i * LANE_W;
+    const cx = lx + LANE_W / 2;
     const active = i === pacLane;
     ctx.fillStyle = active ? `${COLORS[i]}18` : `${COLORS[i]}08`;
     ctx.fillRect(lx, 0, LANE_W, H);
-    ctx.strokeStyle = active ? `${COLORS[i]}60` : 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = active ? `${COLORS[i]}80` : 'rgba(255,255,255,0.06)';
     ctx.lineWidth = active ? 2 : 1;
     ctx.strokeRect(lx, 0, LANE_W, H);
+
+    // Key label background badge
+    const badgeY = JUDGE_Y + PAC_R + 18;
+    ctx.fillStyle = active ? COLORS[i] : `${COLORS[i]}40`;
+    ctx.beginPath();
+    ctx.roundRect(cx - 18, badgeY, 36, 28, 6);
+    ctx.fill();
+    ctx.fillStyle = active ? '#000' : 'rgba(255,255,255,0.6)';
+    ctx.font = `bold 18px Courier New`;
+    ctx.textAlign = 'center';
+    ctx.fillText(LANE_KEYS[i], cx, badgeY + 20);
+
+    // Faint key label in lane center
+    ctx.fillStyle = `${COLORS[i]}15`;
+    ctx.font = `bold 100px Courier New`;
+    ctx.textAlign = 'center';
+    ctx.fillText(LANE_KEYS[i], cx, H / 2 + 40);
   }
 
   // Judge line
