@@ -238,8 +238,8 @@ const LANE_OFFSET_X = 40;
 const JUDGE_Y = H - 100;
 const BAR_H = 18;
 const BAR_SPEED = 160;       // slower
-const PERFECT_WINDOW = 50;
-const GOOD_WINDOW = 100;
+const PERFECT_WINDOW = 80;
+const GOOD_WINDOW = 180;
 
 const COLORS = ['#ff6b6b','#ffd93d','#6bcbff','#a78bfa'];
 
@@ -280,10 +280,11 @@ let judgmentTimer = 0;
 
 // ── Mouth Detection ───────────────────────────────────────────────
 let mouthOpenness = 0;
+let prevMouthOpenness = 0;
 let biteDetected = false;
 let biteState = 'open';
-const BITE_THRESHOLD_CLOSE = 0.05;  // lower = easier to trigger
-const BITE_THRESHOLD_OPEN  = 0.09;
+const BITE_VELOCITY_THRESHOLD = -0.08; // closing speed per frame to trigger
+const BITE_THRESHOLD_OPEN = 0.09;      // must reopen this much to reset
 
 function setupFaceMesh() {
   const videoEl = document.getElementById('webcam');
@@ -315,7 +316,9 @@ function setupFaceMesh() {
     const nose  = lm[1];
     const chin  = lm[152];
     const faceH = Math.abs(chin.y - nose.y) || 0.3;
+    prevMouthOpenness = mouthOpenness;
     mouthOpenness = Math.min(1, Math.abs(lower.y - upper.y) / faceH);
+    const velocity = mouthOpenness - prevMouthOpenness; // negative = closing
 
     // Draw overlay dots
     faceCtx.fillStyle = 'rgba(0,255,170,0.7)';
@@ -326,8 +329,8 @@ function setupFaceMesh() {
       faceCtx.fill();
     });
 
-    // Bite edge detection
-    if (biteState === 'open' && mouthOpenness < BITE_THRESHOLD_CLOSE) {
+    // Bite: trigger on closing motion start, reset when reopened
+    if (biteState === 'open' && velocity < BITE_VELOCITY_THRESHOLD) {
       biteState = 'closed';
       biteDetected = true;
     } else if (biteState === 'closed' && mouthOpenness > BITE_THRESHOLD_OPEN) {
@@ -356,6 +359,14 @@ document.addEventListener('keydown', e => {
     pacLane = Math.max(0, pacLane - 1);
   } else if (e.code === 'ArrowRight') {
     pacLane = Math.min(LANE_COUNT - 1, pacLane + 1);
+  } else if (e.code === 'KeyA') {
+    pacLane = 0;
+  } else if (e.code === 'KeyS') {
+    pacLane = 1;
+  } else if (e.code === 'KeyD') {
+    pacLane = 2;
+  } else if (e.code === 'KeyF') {
+    pacLane = 3;
   } else if (e.code === 'Space' && !e.repeat) {
     biteDetected = true;
     e.preventDefault();
